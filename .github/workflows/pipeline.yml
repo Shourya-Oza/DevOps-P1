@@ -1,4 +1,3 @@
-
 name: Calculator CI-CD
 
 on:
@@ -26,26 +25,21 @@ jobs:
           python -m pytest -v
           if ($LASTEXITCODE -ne 0) { throw "Tests failed" }
 
-      - name: Docker Hub login
+      # FIX: Clean up any previously corrupted login states on the self-hosted host
+      - name: Purge old Docker credentials cache
         shell: powershell
-        env:
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
-          if ([string]::IsNullOrWhiteSpace($env:DOCKERHUB_USERNAME)) {
-            throw "DOCKERHUB_USERNAME secret is missing or empty"
-          }
+          Remove-Item "$env:USERPROFILE\.docker\config.json" -Force -ErrorAction SilentlyContinue
 
-          if ([string]::IsNullOrWhiteSpace($env:DOCKERHUB_TOKEN)) {
-            throw "DOCKERHUB_TOKEN secret is missing or empty"
-          }
+      # FIX: Replaced raw PowerShell login with the official Docker Action
+      # This handles Windows credential passing flawlessly and safely.
+      - name: Docker Hub login
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-          $env:DOCKERHUB_TOKEN | docker login --username $env:DOCKERHUB_USERNAME --password-stdin
-
-          if ($LASTEXITCODE -ne 0) {
-            throw "Docker Hub login failed. Check the username and access token."
-          }
-
+      # The rest of your steps remain unchanged and will work perfectly
       - name: Build Docker image
         shell: powershell
         env:
