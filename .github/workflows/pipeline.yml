@@ -1,8 +1,10 @@
+
 name: Calculator CI-CD
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
 
 jobs:
   build-deploy:
@@ -13,31 +15,63 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Install dependencies
-        run: python -m pip install -r requirements.txt
+        shell: powershell
+        run: |
+          python -m pip install -r requirements.txt
 
       - name: Run tests
-        run: python -m pytest -v
+        shell: powershell
+        run: |
+          python -m pytest -v
 
       - name: Docker Hub login
+        shell: powershell
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
         run: |
-          echo "${{ secrets.DOCKERHUB_TOKEN }}" |
-          docker login -u "${{ secrets.DOCKERHUB_USERNAME }}" \
-            --password-stdin
+          $env:DOCKERHUB_TOKEN | docker login -u $env:DOCKERHUB_USERNAME --password-stdin
+          if ($LASTEXITCODE -ne 0) {
+            throw "Docker Hub login failed"
+          }
 
       - name: Build Docker image
+        shell: powershell
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
-          docker build \
-            -t ${{ secrets.DOCKERHUB_USERNAME }}/calculator:${{ github.run_number }} .
+          $IMAGE = "$env:DOCKERHUB_USERNAME/calculator:${{ github.run_number }}"
+          docker build -t $IMAGE .
+          if ($LASTEXITCODE -ne 0) {
+            throw "Docker build failed"
+          }
 
       - name: Push Docker image
+        shell: powershell
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
-          docker push \
-            ${{ secrets.DOCKERHUB_USERNAME }}/calculator:${{ github.run_number }}
+          $IMAGE = "$env:DOCKERHUB_USERNAME/calculator:${{ github.run_number }}"
+          docker push $IMAGE
+          if ($LASTEXITCODE -ne 0) {
+            throw "Docker push failed"
+          }
 
       - name: Deploy to Kubernetes
+        shell: powershell
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
+          $IMAGE = "$env:DOCKERHUB_USERNAME/calculator:${{ github.run_number }}"
+
           kubectl apply -f deployment.yaml
+          if ($LASTEXITCODE -ne 0) { throw "Deployment apply failed" }
+
           kubectl apply -f service.yaml
-          kubectl set image deployment/calculator \
-            calculator=${{ secrets.DOCKERHUB_USERNAME }}/calculator:${{ github.run_number }}
-          kubectl rollout status deployment/calculator
+          if ($LASTEXITCODE -ne 0) { throw "Service apply failed" }
+
+          kubectl set image deployment/calculator calculator=$IMAGE
+          if ($LASTEXITCODE -ne 0) { throw "Image update failed" }
+
+          kubectl rollout status deployment/calculator --timeout=120s
+          if ($LASTEXITCODE -ne 0) { throw "Kubernetes rollout failed" }
